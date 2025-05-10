@@ -40,7 +40,3 @@ __tests__/
 *.test.js
 *.spec.js
 
-# Documentation
-README.md
-CHANGELOG.md
-LICENSE 
