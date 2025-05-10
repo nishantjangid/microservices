@@ -1,14 +1,17 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
-import { v4 as uuidv4 } from 'uuid';
 import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
 import { User, RegisterRequest, LoginRequest, AuthResponse, UserResponse } from '../types';
 import { connectToMongoDB, getCollection, closeMongoDBConnection } from '../utils/mongodb';
 
 const sqsClient = new SQSClient({ region: process.env.AWS_REGION });
-const USER_EVENTS_QUEUE_URL = process.env.USER_EVENTS_QUEUE_URL!;
-const JWT_SECRET = process.env.JWT_SECRET!;
+const USER_EVENTS_QUEUE_URL = process.env.USER_EVENTS_QUEUE_URL;
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+
+if (!USER_EVENTS_QUEUE_URL) {
+  throw new Error('USER_EVENTS_QUEUE_URL environment variable is not set');
+}
 
 export const register = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   try {
@@ -28,21 +31,22 @@ export const register = async (event: APIGatewayProxyEvent): Promise<APIGatewayP
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Create new user
-    const newUser: User = {
+    const newUser = {
       email,
       password: hashedPassword,
       firstName,
       lastName,
-      role: 'user',
+      role: 'user' as const,
       createdAt: new Date(),
       updatedAt: new Date()
     };
 
-    await users.insertOne(newUser);
+    const insertResult = await users.insertOne(newUser);
+    const userId = insertResult.insertedId.toString();
 
     // Generate JWT token
     const token = jwt.sign(
-      { userId: newUser._id, email: newUser.email },
+      { userId, email: newUser.email },
       JWT_SECRET,
       { expiresIn: '24h' }
     );
@@ -52,7 +56,7 @@ export const register = async (event: APIGatewayProxyEvent): Promise<APIGatewayP
       QueueUrl: USER_EVENTS_QUEUE_URL,
       MessageBody: JSON.stringify({
         type: 'USER_CREATED',
-        payload: { ...newUser, password: undefined },
+        payload: { ...newUser, id: userId, password: undefined },
         timestamp: new Date(),
         source: 'USER_SERVICE'
       })
@@ -60,7 +64,7 @@ export const register = async (event: APIGatewayProxyEvent): Promise<APIGatewayP
 
     const response: AuthResponse = {
       token,
-      user: { ...newUser, password: undefined } as UserResponse
+      user: { ...newUser, id: userId, _id: userId, password: undefined } as unknown as UserResponse
     };
 
     return {
@@ -99,16 +103,19 @@ export const login = async (event: APIGatewayProxyEvent): Promise<APIGatewayProx
       };
     }
 
+    // Use _id for JWT
+    const userId = (user as any)._id?.toString();
+
     // Generate JWT token
     const token = jwt.sign(
-      { userId: user._id, email: user.email },
+      { userId, email: user.email },
       JWT_SECRET,
       { expiresIn: '24h' }
     );
 
     const response: AuthResponse = {
       token,
-      user: { ...user, password: undefined } as UserResponse
+      user: { ...user, id: userId, _id: userId, password: undefined } as unknown as UserResponse
     };
 
     return {
@@ -132,23 +139,23 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     let result: APIGatewayProxyResult;
 
     switch (event.httpMethod) {
-      case 'POST':
-        if (event.path === '/register') {
-          result = await register(event);
-        } else if (event.path === '/login') {
-          result = await login(event);
-        } else {
-          result = {
-            statusCode: 404,
-            body: JSON.stringify({ message: 'Not found' })
-          };
-        }
-        break;
-      default:
+    case 'POST':
+      if (event.path === '/register') {
+        result = await register(event);
+      } else if (event.path === '/login') {
+        result = await login(event);
+      } else {
         result = {
-          statusCode: 405,
-          body: JSON.stringify({ message: 'Method not allowed' })
+          statusCode: 404,
+          body: JSON.stringify({ message: 'Not found' })
         };
+      }
+      break;
+    default:
+      result = {
+        statusCode: 405,
+        body: JSON.stringify({ message: 'Method not allowed' })
+      };
     }
 
     // Close MongoDB connection
@@ -161,4 +168,17 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       body: JSON.stringify({ message: 'Internal server error' })
     };
   }
-}; 
+};
+
+export async function generateToken(user: User): Promise<string> {
+  return jwt.sign(
+    { userId: (user as any)._id?.toString(), email: user.email },
+    JWT_SECRET,
+    { expiresIn: '24h' }
+  );
+}
+
+export async function verifyToken(token: string): Promise<{ userId: string; email: string }> {
+  const decoded = jwt.verify(token, JWT_SECRET) as { userId: string; email: string };
+  return decoded;
+} 

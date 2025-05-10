@@ -1,4 +1,4 @@
-import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { APIGatewayProxyEvent, APIGatewayProxyResult, APIGatewayEventRequestContextWithAuthorizer, APIGatewayEventDefaultAuthorizerContext } from 'aws-lambda';
 import { handler } from './handlers/cartHandler';
 import express, { Request, Response } from 'express';
 
@@ -45,7 +45,7 @@ app.all('*', async (req: Request, res: Response) => {
     path: req.path,
     pathParameters: req.params,
     queryStringParameters: queryParams,
-    requestContext: {} as any,
+    requestContext: {} as APIGatewayEventRequestContextWithAuthorizer<APIGatewayEventDefaultAuthorizerContext>,
     resource: req.path,
     stageVariables: null,
     multiValueHeaders: {},

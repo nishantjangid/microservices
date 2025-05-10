@@ -37,7 +37,7 @@ const sqsClient = new SQSClient({
 });
 
 // Helper function to send events to SQS
-async function sendUserEvent(event: UserEvent) {
+async function sendUserEvent(event: UserEvent): Promise<void> {
   try {
     const command = new SendMessageCommand({
       QueueUrl: USER_EVENTS_QUEUE_URL,
@@ -55,59 +55,61 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     if (!event.body) {
       return {
         statusCode: 400,
-        body: JSON.stringify({ message: 'Request body is required' }),
+        body: JSON.stringify({ message: 'Request body is required' })
       };
     }
 
     const { action, data } = JSON.parse(event.body);
 
     switch (action) {
-      case 'getUser':
-        const user = await usersCollection.findOne({ id: data.userId });
-        if (!user) {
-          return {
-            statusCode: 404,
-            body: JSON.stringify({ message: 'User not found' }),
-          };
-        }
-        const { password: _, ...userWithoutPassword } = user;
+    case 'getUser': {
+      const user = await usersCollection.findOne({ id: data.userId }, { projection: { password: 0 } });
+      if (!user) {
         return {
-          statusCode: 200,
-          body: JSON.stringify(userWithoutPassword),
+          statusCode: 404,
+          body: JSON.stringify({ message: 'User not found' })
         };
+      }
+      return {
+        statusCode: 200,
+        body: JSON.stringify(user)
+      };
+    }
 
-      case 'validateUser':
-        const { userId } = data;
-        const existingUser = await usersCollection.findOne({ id: userId });
-        return {
-          statusCode: existingUser ? 200 : 404,
-          body: JSON.stringify({ exists: !!existingUser }),
-        };
+    case 'validateUser': {
+      const { userId } = data;
+      const existingUser = await usersCollection.findOne({ id: userId });
+      return {
+        statusCode: existingUser ? 200 : 404,
+        body: JSON.stringify({ exists: !!existingUser })
+      };
+    }
 
-      default:
-        return {
-          statusCode: 400,
-          body: JSON.stringify({ message: 'Invalid action' }),
-        };
+    default:
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ message: 'Invalid action' })
+      };
     }
   } catch (error) {
     console.error('Error in event handler:', error);
     return {
       statusCode: 500,
-      body: JSON.stringify({ message: 'Internal server error' }),
+      body: JSON.stringify({ message: 'Internal server error' })
     };
   }
 };
 
 // Register a new user
-export async function registerUser(req: Request<{}, {}, RegisterUserRequest>, res: Response) {
+export async function registerUser(req: Request<Record<string, never>, Record<string, never>, RegisterUserRequest>, res: Response): Promise<void> {
   try {
     const { email, password, firstName, lastName, phoneNumber, address } = req.body;
 
     // Check if user already exists
     const existingUser = await usersCollection.findOne({ email });
     if (existingUser) {
-      return res.status(400).json({ message: 'User already exists' });
+      res.status(400).json({ message: 'User already exists' });
+      return;
     }
 
     // Hash password
@@ -129,6 +131,10 @@ export async function registerUser(req: Request<{}, {}, RegisterUserRequest>, re
     // Save user to database
     await usersCollection.insertOne(newUser);
 
+    // Remove password from response
+    delete newUser.password;
+    res.status(201).json(newUser);
+
     // Send user created event
     await sendUserEvent({
       type: 'USER_CREATED',
@@ -138,10 +144,6 @@ export async function registerUser(req: Request<{}, {}, RegisterUserRequest>, re
         timestamp: new Date()
       }
     });
-
-    // Remove password from response
-    const { password: _, ...userWithoutPassword } = newUser;
-    res.status(201).json(userWithoutPassword);
   } catch (error) {
     console.error('Error registering user:', error);
     res.status(500).json({ message: 'Error registering user' });
@@ -149,20 +151,22 @@ export async function registerUser(req: Request<{}, {}, RegisterUserRequest>, re
 }
 
 // Login user
-export async function loginUser(req: Request<{}, {}, LoginRequest>, res: Response) {
+export async function loginUser(req: Request<Record<string, never>, Record<string, never>, LoginRequest>, res: Response): Promise<void> {
   try {
     const { email, password } = req.body;
 
     // Find user
     const user = await usersCollection.findOne({ email });
     if (!user) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      res.status(401).json({ message: 'Invalid credentials' });
+      return;
     }
 
     // Verify password
     const isValidPassword = await bcrypt.compare(password, user.password);
     if (!isValidPassword) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      res.status(401).json({ message: 'Invalid credentials' });
+      return;
     }
 
     // Generate JWT token
@@ -173,8 +177,8 @@ export async function loginUser(req: Request<{}, {}, LoginRequest>, res: Respons
     );
 
     // Remove password from response
-    const { password: _, ...userWithoutPassword } = user;
-    res.json({ token, user: userWithoutPassword });
+    delete user.password;
+    res.json({ token, user });
   } catch (error) {
     console.error('Error logging in:', error);
     res.status(500).json({ message: 'Error logging in' });
@@ -182,21 +186,28 @@ export async function loginUser(req: Request<{}, {}, LoginRequest>, res: Respons
 }
 
 // Change password
-export async function changePassword(req: Request<{}, {}, ChangePasswordRequest>, res: Response) {
+export async function changePassword(req: Request<Record<string, never>, Record<string, never>, ChangePasswordRequest>, res: Response): Promise<void> {
   try {
     const { currentPassword, newPassword } = req.body;
-    const userId = (req as any).user.userId; // From auth middleware
+    const userId = (req as { user?: { userId: string } }).user?.userId;
+
+    if (!userId) {
+      res.status(401).json({ message: 'User not authenticated' });
+      return;
+    }
 
     // Find user
     const user = await usersCollection.findOne({ id: userId });
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      res.status(404).json({ message: 'User not found' });
+      return;
     }
 
     // Verify current password
     const isValidPassword = await bcrypt.compare(currentPassword, user.password);
     if (!isValidPassword) {
-      return res.status(401).json({ message: 'Current password is incorrect' });
+      res.status(401).json({ message: 'Current password is incorrect' });
+      return;
     }
 
     // Hash new password
@@ -216,14 +227,15 @@ export async function changePassword(req: Request<{}, {}, ChangePasswordRequest>
 }
 
 // Forgot password
-export async function forgotPassword(req: Request<{}, {}, ForgotPasswordRequest>, res: Response) {
+export async function forgotPassword(req: Request<Record<string, never>, Record<string, never>, ForgotPasswordRequest>, res: Response): Promise<void> {
   try {
     const { email } = req.body;
 
     // Find user
     const user = await usersCollection.findOne({ email });
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      res.status(404).json({ message: 'User not found' });
+      return;
     }
 
     // Generate reset token
@@ -243,7 +255,7 @@ export async function forgotPassword(req: Request<{}, {}, ForgotPasswordRequest>
 }
 
 // Reset password
-export async function resetPassword(req: Request<{}, {}, ResetPasswordRequest>, res: Response) {
+export async function resetPassword(req: Request<Record<string, never>, Record<string, never>, ResetPasswordRequest>, res: Response): Promise<void> {
   try {
     const { token, newPassword } = req.body;
 
@@ -254,7 +266,8 @@ export async function resetPassword(req: Request<{}, {}, ResetPasswordRequest>, 
     // Find user
     const user = await usersCollection.findOne({ id: userId });
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      res.status(404).json({ message: 'User not found' });
+      return;
     }
 
     // Hash new password
@@ -274,15 +287,21 @@ export async function resetPassword(req: Request<{}, {}, ResetPasswordRequest>, 
 }
 
 // Update profile
-export async function updateProfile(req: Request<{}, {}, UpdateProfileRequest>, res: Response) {
+export async function updateProfile(req: Request<Record<string, never>, Record<string, never>, UpdateProfileRequest>, res: Response): Promise<void> {
   try {
-    const userId = (req as any).user.userId; // From auth middleware
+    const userId = (req as { user?: { userId: string } }).user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: 'User not authenticated' });
+      return;
+    }
+
     const updates = req.body;
 
     // Find user
     const user = await usersCollection.findOne({ id: userId });
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      res.status(404).json({ message: 'User not found' });
+      return;
     }
 
     // Update user
@@ -303,9 +322,13 @@ export async function updateProfile(req: Request<{}, {}, UpdateProfileRequest>, 
 
     // Get updated user
     const updatedUser = await usersCollection.findOne({ id: userId });
-    const { password: _, ...userWithoutPassword } = updatedUser!;
+    if (!updatedUser) {
+      res.status(404).json({ message: 'User not found after update' });
+      return;
+    }
 
-    res.json(userWithoutPassword);
+    delete updatedUser.password;
+    res.json(updatedUser);
   } catch (error) {
     console.error('Error updating profile:', error);
     res.status(500).json({ message: 'Error updating profile' });
@@ -313,19 +336,24 @@ export async function updateProfile(req: Request<{}, {}, UpdateProfileRequest>, 
 }
 
 // Get user profile
-export async function getProfile(req: Request, res: Response) {
+export async function getProfile(req: Request, res: Response): Promise<void> {
   try {
-    const userId = (req as any).user.userId; // From auth middleware
+    const userId = (req as { user?: { userId: string } }).user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: 'User not authenticated' });
+      return;
+    }
 
     // Find user
     const user = await usersCollection.findOne({ id: userId });
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      res.status(404).json({ message: 'User not found' });
+      return;
     }
 
     // Remove password from response
-    const { password: _, ...userWithoutPassword } = user;
-    res.json(userWithoutPassword);
+    delete user.password;
+    res.json(user);
   } catch (error) {
     console.error('Error getting profile:', error);
     res.status(500).json({ message: 'Error getting profile' });

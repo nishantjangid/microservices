@@ -1,6 +1,7 @@
 import express from 'express';
 import { handler } from './handlers/userHandler';
 import userRoutes from './routes/userRoutes';
+import { APIGatewayProxyEvent, APIGatewayEventRequestContextWithAuthorizer, APIGatewayEventDefaultAuthorizerContext } from 'aws-lambda';
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -17,12 +18,12 @@ app.post('/events', async (req, res) => {
     const result = await handler({
       body: JSON.stringify(req.body),
       pathParameters: req.params,
-      queryStringParameters: req.query as any,
-      headers: req.headers as any,
+      queryStringParameters: req.query as APIGatewayProxyEvent['queryStringParameters'],
+      headers: req.headers as APIGatewayProxyEvent['headers'],
       httpMethod: req.method,
       isBase64Encoded: false,
       path: req.path,
-      requestContext: {} as any,
+      requestContext: {} as APIGatewayEventRequestContextWithAuthorizer<APIGatewayEventDefaultAuthorizerContext>,
       resource: '',
       stageVariables: null,
       multiValueHeaders: {},

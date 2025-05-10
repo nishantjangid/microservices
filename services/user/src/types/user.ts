@@ -1,16 +1,16 @@
 export interface User {
   id: string;
   email: string;
-  password: string;
+  password?: string;
   firstName: string;
   lastName: string;
   phoneNumber?: string;
   address?: {
-    street: string;
-    city: string;
-    state: string;
-    country: string;
-    zipCode: string;
+    street?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    zipCode?: string;
   };
   createdAt: Date;
   updatedAt: Date;
@@ -23,11 +23,11 @@ export interface RegisterUserRequest {
   lastName: string;
   phoneNumber?: string;
   address?: {
-    street: string;
-    city: string;
-    state: string;
-    country: string;
-    zipCode: string;
+    street?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    zipCode?: string;
   };
 }
 
@@ -60,11 +60,11 @@ export interface UpdateProfileRequest {
   lastName?: string;
   phoneNumber?: string;
   address?: {
-    street: string;
-    city: string;
-    state: string;
-    country: string;
-    zipCode: string;
+    street?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    zipCode?: string;
   };
 }
 
