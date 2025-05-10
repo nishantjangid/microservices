@@ -1,0 +1,130 @@
+name: ecommerce-microservices
+
+services:
+  mongodb:
+    image: mongo:latest
+    container_name: ecommerce-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - ecommerce-network
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: ecommerce-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=sqs
+      - PERSISTENCE=1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - ecommerce-network
+
+  user-service:
+    build:
+      context: .
+      dockerfile: services/user/Dockerfile
+    container_name: ecommerce-user-service
+    ports:
+      - "3001:3000"
+    environment:
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - USER_EVENTS_QUEUE_URL=http://localstack:4566/000000000000/user-events
+    depends_on:
+      mongodb:
+        condition: service_started
+      localstack:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+
+  cart-service:
+    build:
+      context: .
+      dockerfile: services/cart/Dockerfile
+    container_name: ecommerce-cart-service
+    ports:
+      - "3002:3000"
+    environment:
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_ENDPOINT_URL=http://localstack:4566
+    depends_on:
+      mongodb:
+        condition: service_started
+      localstack:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+
+  order-service:
+    build:
+      context: .
+      dockerfile: services/order/Dockerfile
+    container_name: ecommerce-order-service
+    ports:
+      - "3003:3000"
+    environment:
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_ENDPOINT_URL=http://localstack:4566
+    depends_on:
+      mongodb:
+        condition: service_started
+      localstack:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+
+  microservices-api-docs:
+    build:
+      context: ./api-docs
+      dockerfile: Dockerfile
+    container_name: ecommerce-api-docs
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./api-docs:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - DOCKER_CLIENT_TIMEOUT=120
+      - COMPOSE_HTTP_TIMEOUT=120
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    depends_on:
+      - user-service
+      - cart-service
+      - order-service
+    networks:
+      - ecommerce-network
+
+volumes:
+  mongodb_data:
+  localstack_data:
+
+networks:
+  ecommerce-network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: 1500 

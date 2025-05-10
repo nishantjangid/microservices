@@ -1,0 +1,46 @@
+# Node.js
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Logs
+logs
+*.log
+
+# Build output
+dist/
+build/
+coverage/
+
+# Environment variables
+.env
+.env.*
+
+# Docker
+*.local
+Dockerfile*
+.dockerignore
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Misc
+*.tgz
+
+# Test
+__tests__/
+*.test.js
+*.spec.js
+
+# Documentation
+README.md
+CHANGELOG.md
+LICENSE 
